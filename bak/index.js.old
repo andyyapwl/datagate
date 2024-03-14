@@ -1,0 +1,397 @@
+const mysql = require('mysql');
+const socketio = require('socket.io');
+const http = require('http');
+const express = require('express'); // Add Express for serving socket.io
+const cors = require('cors'); // Import the cors package
+const jsonMapper = require('json-mapper');
+
+const app = express();
+const server = http.createServer(app);
+//const io = socketio(server);
+
+const io = require("socket.io")(server, {
+  cors: {
+    origin: "*",
+    methods: ["GET", "POST"]
+  },
+  maxHttpBufferSize: 10e8
+});
+
+
+// Enable CORS for all routes
+app.use(cors()); // Add this line to enable CORS for all routes
+
+const dbConfig = {
+  host: 'localhost',
+  user: 'root',
+  password: 'cannotseehaha555',
+  database: 'datamessage_db',
+
+};
+
+// Connect to MySQL database
+let connectionAttempts = 0;
+const maxConnectionRetries = 5;
+let connection;
+
+function establishConnection() {
+  connection = mysql.createConnection(dbConfig);
+
+  connection.connect((err) => {
+    if (err) {
+      console.error('Error connecting to the database:', err);
+      if (connectionAttempts < maxConnectionRetries) {
+        console.log('Retrying connection...');
+        connectionAttempts++;
+        setTimeout(establishConnection, 5000); // Retry after 5 seconds
+      } else {
+        console.error('Max connection retries reached. Exiting.');
+        process.exit(1); // Exit the process
+      }
+    } else {
+      console.log('Connected to the database');
+      connectionAttempts = 0; // Reset connection attempts on successful connection
+    }
+  });
+}
+
+//establishConnection(); // Initial connection attempt
+
+/*
+const connection = mysql.createConnection(dbConfig);
+connection.connect();
+*/
+
+// Create Socket.io server
+server.listen(3000, () => {
+  console.log('Server listening on port 3000');
+});
+
+var userSockets = [];
+//const activeConnections = new Map();
+
+
+io.on('connection', (socket) => {
+  const socketIdx = getUserSocketIndex(socket.id);
+  let userId = null;
+
+  if(socketIdx > -1) {
+	const userSocket = usersockets[socketIdx];
+	if(userSocket!=null)
+		userId = usersocket.userId;
+  }
+  
+  console.log("Client " + socket.id + " (" + userId + ") connected. socketIdx:" + socketIdx + " Active Connection:" + userSockets.length);
+  socket.on('message', (jsonData) => {
+	let dataMessage = null;
+	try {
+		dataMessage = JSON.parse(jsonData);
+	}catch(err) {
+	   console.log(err);
+	   dataMessage = jsonData;
+	}
+	
+    let senderId = dataMessage.from_id;
+
+	if(senderId == null || senderId == "")
+		senderId = dataMessage.from_others;
+	
+    let recipientId = dataMessage.to_id;
+    let encryptedData = dataMessage.body;
+	
+	//console.log("encryptedData body: " + encryptedData);
+	
+    let messageId = dataMessage.id;
+    let action = dataMessage.action;
+    let type = dataMessage.type;
+    let title = dataMessage.title;
+    let tableCode = dataMessage.table_code;
+	let options = dataMessage.options;
+	let msgSize = dataMessage.msg_size;
+	let sentTimestamp = dataMessage.sent_timestamp;
+    let status = "Sending";
+    dataMessage.status = status;
+
+    console.log("Incoming message from " + senderId + " from_others:" + dataMessage.from_others + " msgSize:" + msgSize + " timestamp:" + sentTimestamp);
+	
+    // Establish a new database connection only when needed
+    const connection = mysql.createConnection(dbConfig);
+    connection.connect((err) => {
+      if (err) {
+        console.error('Error connecting to the database:', err);
+        return;
+      }
+
+      try {
+		  
+		  connection.query('SELECT * FROM data_table WHERE id = ?', [messageId], (error, results) => {
+            if (error) {
+              console.error('Error fetching pending data:', error);
+            } else {
+              let senderId = '';
+              if (results.length > 0) {
+                   console.log("Warning: Message id:" + messageId + " already exists!. Will delete and re-insert again from current message request");
+				   try {
+					connection.query('DELETE FROM data_table WHERE id = ?', [messageId], (error) => {
+					  if (error) {
+						console.error('Error deleting data:', error);
+					  } else {
+						console.log('Data Message SendOnly id:' + messageId + " was successfully deleted.");
+					  }
+					});
+				  }
+				  catch (err) {
+					console.log(err);
+				  }
+              }
+            }
+            //connection.end(); // Close the database connection
+          });
+		  
+		  
+        connection.query('INSERT INTO data_table (id, from_id, to_id, body,status,action,type,table_code,title,options,msg_size,sent_timestamp) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)',
+          [messageId, senderId, recipientId, encryptedData, status, action, type, tableCode, title,options,msgSize,sentTimestamp], (error) => {
+            if (error) {
+              console.error('Error storing data:', error);
+            } else {
+              console.log("Calling sender's gateway_acknowledge for id:" + messageId);
+              socket.emit('gateway_acknowledge', messageId);
+            }
+            connection.end(); // Close the database connection
+          });
+      }
+      catch (err) {
+        console.log(err);
+      }
+    });
+
+    var toUserSockets = getUserSockets(recipientId);
+    console.log("Online " + recipientId + " no of sockets:" + toUserSockets.length);
+    for (var i = 0; i < toUserSockets.length; i++) {
+      var toUserSocket = toUserSockets[i];
+      toUserSocket.socket.emit('message', dataMessage);
+      console.log("Sending message to " + toUserSocket.userId + " socket id:" + toUserSocket.socket.id + " for msg id:" + dataMessage.id);
+    }
+  });
+
+  socket.on('delivered', (messageId) => {
+    console.log('Data acknowledged by  for message id:' + messageId);
+
+    // Establish a new database connection only when needed
+    const connection = mysql.createConnection(dbConfig);
+    connection.connect((err) => {
+      if (err) {
+        console.error('Error connecting to the database:', err);
+        return;
+      }
+
+      connection.query("UPDATE data_table SET status= 'Delivered' WHERE id = ?", [messageId], (error) => {
+        if (error) {
+          console.error('Error updating data to status=Delivered:', error);
+        } else {
+          //console.log('Data id:' + messageId + ' status has been updated to Delivered');
+
+          connection.query('SELECT * FROM data_table WHERE id = ?', [messageId], (error, results) => {
+            if (error) {
+              console.error('Error fetching pending data:', error);
+            } else {
+              let senderId = '';
+              if (results.length > 0) {
+                const dataMessage = results[0];
+                senderId = dataMessage.from_id;
+                msgType = dataMessage.type;
+				console.log('On Receipient.Delivered msgType:' + msgType);
+                if (msgType == "SendOnly") {
+                  try {
+                    connection.query('DELETE FROM data_table WHERE id = ?', [messageId], (error) => {
+                      if (error) {
+                        console.error('Error deleting data:', error);
+                      } else {
+                        console.log('Data Message SendOnly id:' + messageId + " was successfully deleted.");
+                      }
+                    });
+                  }
+                  catch (err) {
+                    console.log(err);
+                  }
+                }
+                else {
+                  var senderUserSockets = getUserSockets(senderId);
+                  for (var i = 0; i < senderUserSockets.length; i++) {
+                    var senderSocket = senderUserSockets[i];
+                    senderSocket.socket.emit('delivered', messageId);
+                  }
+                }
+              }
+            }
+            connection.end(); // Close the database connection
+          }
+          );
+        }
+      });
+    });
+  });
+
+  socket.on('sender_acknowledge', (messageId) => {
+    console.log('Data acknowledged by sender for messageId: ' + messageId);
+    // Establish a new database connection only when needed
+    const connection = mysql.createConnection(dbConfig);
+    connection.connect((err) => {
+      if (err) {
+        console.error('Error connecting to the database:', err);
+        return;
+      }
+
+      try {
+        connection.query('DELETE FROM data_table WHERE id = ?', [messageId], (error) => {
+          if (error) {
+            console.error('Error deleting data:', error);
+          } else {
+            //console.log('Encrypted data deleted from MySQL for acknowledged sender');
+          }
+          connection.end();
+        });
+      }
+      catch (err) {
+        console.log(err);
+      }
+    });
+  });
+
+  socket.on('disconnect', () => {
+    var index = getUserSocketIndex(socket.id);
+    var removedUserSocket = userSockets[index];
+    socket.emit('left', "1");
+
+    if (socket != null)
+      removeUserSocket(socket.id);
+    if (removedUserSocket != null)
+      console.log('user disconnected user:' + removedUserSocket.userId + " socketid:" + socket.id + " active usersockets:" + userSockets.length);
+  });
+
+
+  // Send pending messages to the newly connected recipient
+  socket.on('join', (userId) => {
+    socket.emit('joined', "1");
+
+    dropDeadSocket();
+    addUserSocket(userId, socket);
+
+	console.log("User id: " + userId + " socket id:" + socket.id + " joined! Active connection:" + userSockets.length);
+
+    // Establish a new database connection only when needed
+    const connection = mysql.createConnection(dbConfig);
+    connection.connect((err) => {
+      if (err) {
+        console.error('Error connecting to the database:', err);
+        return;
+      }
+      try {
+        connection.query("SELECT * FROM data_table WHERE to_id = ? and status='Sending'", [userId], (error, results) => {
+          if (error) {
+            console.error('Error fetching pending data:', error);
+          } else {
+            //const pendingMessages = results.map(row => ({ id: row.id, action: row.action,type:row.type, }));
+            console.log("Total pending data messages: " + results.length);
+            for (let dataMessage of results) {
+              socket.emit('message', dataMessage);
+            }
+          }
+        });
+        connection.query("SELECT * FROM data_table WHERE from_id = ? and status='Delivered'", [userId], (error, results) => {
+          if (error) {
+            console.error('Error fetching pending data:', error);
+          } else {
+            console.log("Total data messages to be sender acknowledged: " + results.length);
+            for (const dataMessage of results) {
+              socket.emit('delivered', dataMessage.id);
+              console.log("Send id " + dataMessage.id + " back to sender to ack");
+            }
+          }
+        });
+        connection.end(); // Close the database connection
+      }
+      catch (err) {
+        console.log(err);
+      }
+    });
+  });
+});
+function isRecipientOnline(recipientId) {
+  return activeConnections.has(recipientId);
+}
+
+function fetchUserIdByEmail(email) {
+  // Fetch user ID based on email from your database and return it
+  // Replace this function with your database query logic
+}
+
+function getUserSockets(userId) {
+  var sockets = [];
+  for (var i = 0; i < userSockets.length; i++) {
+    var userSocket = userSockets[i];
+    if (userSocket.userId == userId)
+      sockets.push(userSocket);
+  }
+  return sockets;
+}
+
+function getUserSocketByUserIdSocketId(userId, socketId) {
+  for (var i = 0; i < userSockets.length; i++) {
+    var userSocket = userSockets[i];
+    if (userSocket.userId == userId && userSocket.socket.id == socketId)
+      return userSocket;
+  }
+  return null;
+}
+
+function addUserSocket(userId, socket) {
+  var item = { userId: userId, socket: socket };
+  let checkExists = getUserSocketByUserIdSocketId(userId, socket.id);
+  if (checkExists == null) {
+    userSockets.push(item);
+    console.log("User id: " + item.userId + " socket.id:" + socket.id + " added to the connection list!");
+  } else {
+    console.log("User id: " + item.userId + " socket.id:" + socket.id + " already in the connection list!");
+  }
+}
+
+function dropDeadSocket() {
+  userSockets.forEach(function (usocket) {
+	  console.log("dropdeadsocket userid: " + usocket.userId);
+    if (!usocket.socket.connected || !usocket.userId) {
+	  console.log("Drop deadsocket id: " + usocket.socket.id);
+      removeUserSocket(usocket.socket.id);
+    }
+  }
+  );
+}
+
+function getUserSocketIndex(socketId) {
+  for (let i = 0; i < userSockets.length; i++) {
+    let userSocket = userSockets[i];
+    if (userSocket.socket.id == socketId)
+      return i;
+  }
+  return -1;
+}
+
+function removeUserSocket(socketId) {
+  let index = getUserSocketIndex(socketId);
+  if (index > -1) {
+    userSockets.splice(index, 1);
+    let user = userSockets[index];
+    if (user != null)
+      console.log("Remove Socket user id:" + userSockets[index].userId + " no of sockets left:" + userSockets.length);
+    else
+      console.log("Warning user is null in removeUserSocket for index:" + index + " no of sockets left:" + userSockets.length);
+  }
+}
+
+
+function listUserSockets() {
+  for (let i = 0; i < userSockets.length; i++) {
+    console.log("Socket user id:" + userSockets[index].userId);
+  }
+}
+
