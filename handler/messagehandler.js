@@ -45,10 +45,12 @@ class MessageHandler {
     }
 
     // Save content to file
-    await this.fileManager.saveContentToFile(dataMessage);
-
+    const newDataMessage = {...dataMessage};
+    //logger.info("newDataMessage.body: " + newDataMessage.body);
+    const filePath = await this.fileManager.saveContentToFile(newDataMessage);
+    newDataMessage.body = filePath;
     // Insert dataMessage into the database
-    await this.dataMessageRepository.insert(dataMessage);
+    await this.dataMessageRepository.insert(newDataMessage);
 
     // Emit acknowledgment
     this.socket.emit("gateway_acknowledge", dataMessage.id);

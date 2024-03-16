@@ -54,7 +54,7 @@ class UserSocketManager {
     logger.info(`Online ${dataMessage.toId} no of sockets: ${toUserSockets.length}`);
     for (const toUserSocket of toUserSockets) {
       toUserSocket.socket.emit("message", dataMessage);
-      logger.info.log(
+      logger.info(
         `Sending message to ${toUserSocket.userId} socket id: ${toUserSocket.socket.id} for msg id: ${dataMessage.id}`
       );
     }
@@ -62,7 +62,7 @@ class UserSocketManager {
 
   dropDeadSocket() {
     for (const usocket of this.userSockets) {
-      logger.info.log("dropdeadsocket userid: " + usocket.userId);
+      logger.info("dropdeadsocket userid: " + usocket.userId);
       if (!usocket.socket.connected || !usocket.userId) {
         logger.info("Drop deadsocket id: " + usocket.socket.id);
         removeUserSocket(usocket.socket.id);

@@ -11,6 +11,7 @@ const SenderAcknowledgementHandler = require("../handler/senderacknowledgehandle
 const DataMessageRepository = require("../repository/datamessagerepository");
 const UserSocketManager = require("../usersocketmanager");
 const SocketEventHandler = require('../handler/socketeventhandler');
+const FileManager = require('../filemanager');
 const logger = require("../logger");
 
 class DataMessageService {
@@ -27,13 +28,15 @@ class DataMessageService {
     this.dataMessageRepository = null;
     this.userSocketManager = null;
     this.socketEventHandler = null;
+    this.fileManager = null;
   }
 
   establishConnection() {
     this.connection = mysql.createConnection(this.dbConfig);
     this.dataMessageRepository = new DataMessageRepository(this.connection);
     this.userSocketManager = new UserSocketManager();
-    this.socketEventHandler = new SocketEventHandler(this.dataMessageRepository, this.userSocketManager);
+    this.fileManager = new FileManager();
+    this.socketEventHandler = new SocketEventHandler(this.dataMessageRepository, this.userSocketManager,this.fileManager);
 
     this.connection.connect((err) => {
       if (err) {
