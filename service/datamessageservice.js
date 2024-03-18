@@ -10,9 +10,10 @@ const DataMessage = require("../model/datamessage");
 const SenderAcknowledgementHandler = require("../handler/senderacknowledgehandler");
 const DataMessageRepository = require("../repository/datamessagerepository");
 const UserSocketManager = require("../usersocketmanager");
-const SocketEventHandler = require('../handler/socketeventhandler');
-const FileManager = require('../filemanager');
+const SocketEventHandler = require("../handler/socketeventhandler");
+const FileManager = require("../filemanager");
 const logger = require("../logger");
+const constants = require("../constants");
 
 class DataMessageService {
   constructor() {
@@ -36,7 +37,11 @@ class DataMessageService {
     this.dataMessageRepository = new DataMessageRepository(this.connection);
     this.userSocketManager = new UserSocketManager();
     this.fileManager = new FileManager();
-    this.socketEventHandler = new SocketEventHandler(this.dataMessageRepository, this.userSocketManager,this.fileManager);
+    this.socketEventHandler = new SocketEventHandler(
+      this.dataMessageRepository,
+      this.userSocketManager,
+      this.fileManager
+    );
 
     this.connection.connect((err) => {
       if (err) {
@@ -47,10 +52,39 @@ class DataMessageService {
     });
   }
 
+  async getById(id) {
+    return this.dataMessageRepository.findById(id);
+  }
+
   startServer(port) {
     const app = express();
     app.use(cors());
     const server = http.createServer(app);
+
+    app.get("/api/datamessages/:id", async (req, res) => {
+      const id = req.params.id; // Extract the ID from the request parameters
+      try {
+        const dataMessage = await this.getById(id); // Call the service method to get the data message by ID
+        if (dataMessage.body.startsWith(constants.FILE_PREFIX)) {
+          // Extract path after 'file://'
+          let filePath = dataMessage.body.substring(
+            constants.FILE_PREFIX.length
+          );
+          // Read file content
+          let fileContent = this.fileManager.readFileContent(filePath);
+          //logger.info("fileContent:" + fileContent);
+          // Set dataMessage.body to fileContent
+          dataMessage.body = fileContent;
+          //logger.info("Sending message body: " + dataMessage.body);
+        }
+
+        res.json(dataMessage); // Send the retrieved data message as JSON response
+      } catch (error) {
+        logger.error("Error fetching data message:", error);
+        res.status(500).json({ error: "Internal server error" }); // Handle errors appropriately
+      }
+    });
+
     this.io = socketio(server, {
       cors: {
         origin: "*",
@@ -102,7 +136,9 @@ class DataMessageService {
 
     socket.on("disconnect", () => {
       // Handle socket disconnection
-      const removedUserSocket = this.userSocketManager.removeUserSocket(socket.id);
+      const removedUserSocket = this.userSocketManager.removeUserSocket(
+        socket.id
+      );
       socket.emit("left", "1");
       if (removedUserSocket != null) {
         logger.info(

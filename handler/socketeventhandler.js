@@ -28,13 +28,13 @@ class SocketEventHandler {
         await this.dataMessageRepository.getPendingMessagesForUser(userId);
       logger.info("Total pending data messages: " + pendingMessages.length);
       for (const dataMessage of pendingMessages) {
-        logger.info("dataMessage.body.startsWith(constants.FILE_PREFIX):" + (dataMessage.body.startsWith(constants.FILE_PREFIX)) + " dataMessage.body: " + dataMessage.body + " constants.FILE_PREFIX:" + constants.FILE_PREFIX);
+        //logger.info("dataMessage.body.startsWith(constants.FILE_PREFIX):" + (dataMessage.body.startsWith(constants.FILE_PREFIX)) + " dataMessage.body: " + dataMessage.body + " constants.FILE_PREFIX:" + constants.FILE_PREFIX);
         if (dataMessage.body.startsWith(constants.FILE_PREFIX)) {
           // Extract path after 'file://'
           let filePath = dataMessage.body.substring(constants.FILE_PREFIX.length);
           // Read file content
           let fileContent = this.fileManager.readFileContent(filePath);
-          logger.info("fileContent:" + fileContent);
+          //logger.info("fileContent:" + fileContent);
           // Set dataMessage.body to fileContent
           dataMessage.body = fileContent;
           //logger.info("Sending message body: " + dataMessage.body);
