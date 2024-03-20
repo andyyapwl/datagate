@@ -24,7 +24,5 @@ if (process.env.NODE_ENV !== "production") {
 
 const DataMessageService = require("./service/datamessageservice");
 const dataMessageService = new DataMessageService();
-dataMessageService.establishConnection();
-
 const port = 3000; // Choose your desired port
 dataMessageService.startServer(port);

@@ -17,24 +17,9 @@ const constants = require("../constants");
 
 class DataMessageService {
   constructor() {
-    this.dbConfig = {
-      host: "localhost",
-      user: "root",
-      password: "",
-      database: "datamessage_db",
-    };
     this.userSockets = [];
     this.io = null;
-    this.connection = null;
-    this.dataMessageRepository = null;
-    this.userSocketManager = null;
-    this.socketEventHandler = null;
-    this.fileManager = null;
-  }
-
-  establishConnection() {
-    this.connection = mysql.createConnection(this.dbConfig);
-    this.dataMessageRepository = new DataMessageRepository(this.connection);
+    this.dataMessageRepository = new DataMessageRepository();
     this.userSocketManager = new UserSocketManager();
     this.fileManager = new FileManager();
     this.socketEventHandler = new SocketEventHandler(
@@ -42,14 +27,6 @@ class DataMessageService {
       this.userSocketManager,
       this.fileManager
     );
-
-    this.connection.connect((err) => {
-      if (err) {
-        logger.error("Error connecting to the database:", err);
-        return;
-      }
-      logger.info("Connected to the database");
-    });
   }
 
   async getById(id) {
